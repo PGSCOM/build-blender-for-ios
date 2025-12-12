@@ -1,0 +1,86 @@
+name: Blender iOS build (clone from projects.blender.org)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Install tools
+        run: |
+          brew update
+          brew install git-lfs cmake
+          git lfs install
+
+      - name: Clone Blender (projects.blender.org) with LFS
+        run: |
+          git clone https://projects.blender.org/blender/blender.git
+          cd blender
+          git checkout ios
+          git lfs fetch origin
+          git lfs pull
+      - name: Install Dependencies
+        run: |
+          brew install cmake git-lfs svn
+          git lfs install
+  
+      - name: Cache Libraries (Critical for Speed)
+        id: cache-libs
+        uses: actions/cache@v3
+        with:
+          path: ../lib/
+          key: ${{ runner.os }}-blender-lib-ios-${{ hashFiles('build_files/build_environment/install_deps.sh') }}
+  
+      - name: Download Libraries (SVN)
+        if: steps.cache-libs.outputs.cache-hit != 'true'
+        run: |
+          # Descarga las librerías necesarias. Esto tarda bastante la primera vez.
+          mkdir -p ../lib
+          svn checkout https://svn.blender.org/svnroot/bf-blender/trunk/lib/ios_arm64 ../lib/ios_arm64
+          svn checkout https://svn.blender.org/svnroot/bf-blender/trunk/lib/darwin_arm64 ../lib/darwin_arm64
+  
+      - name: Configure CMake (iOS)
+        run: |
+          # Configuramos para iOS. Importante: Desactivamos la firma forzosa aquí para que CI no falle.
+          cmake -S . -B build_ios -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY="" \
+            -DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM=""
+  
+      # PASO CRÍTICO DEL VIDEO (Automatizado)
+      # El video dice: "Copia el script de generate CMake files y ejecútalo manualmente".
+      # Aquí lo hacemos automáticamente buscando el script python de actualización.
+      - name: Run Make Update (The "Manual Step")
+        run: |
+          # Esto equivale a correr el script para preparar los tools cruzados
+          # Forzamos el uso de librerías iOS
+          python3 ./build_files/utils/make_update.py --use-ios-libraries
+  
+      - name: Build Blender (Release)
+        run: |
+          # Compilamos todo. Al tener CODE_SIGNING_ALLOWED=NO, Xcode no se quejará de faltar tu ID.
+          # Esto compilará también gstd_compress sin firmar.
+          cmake --build build_ios --config Release --parallel 3
+  
+      - name: Prepare IPA
+        run: |
+          cd build_ios
+          mkdir Payload
+          # Movemos la app compilada a la estructura estándar de un IPA
+          cp -r Release-iphoneos/Blender.app Payload/
+          
+          # EL TRUCO: Eliminamos cualquier firma rota previa para limpiar el paquete
+          codesign --remove-signature Payload/Blender.app || true
+          
+          # Comprimimos
+          zip -r Blender_iOS_Unsigned.ipa Payload
+  
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Blender_iOS_ReadyToSign
+          path: build_ios/Blender_iOS_Unsigned.ipa
