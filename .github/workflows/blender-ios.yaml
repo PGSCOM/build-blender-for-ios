@@ -1,4 +1,4 @@
-name: Blender iOS build (Corrected)
+name: Blender iOS build (Fixed Paths)
 
 on:
   workflow_dispatch:
@@ -26,15 +26,25 @@ jobs:
       - name: Descargar librerías iOS (script oficial)
         working-directory: blender
         run: |
-          # Este script descarga las librerías precompiladas necesarias
+          # make_update.py descarga las librerías en ../lib (hermana de blender)
           python3 ./build_files/utils/make_update.py --use-ios-libraries
-          make update
+          
+      - name: Verificar Librerías (Diagnóstico)
+        run: |
+          echo "Verificando contenido de ../lib/ios_arm64..."
+          if [ -d "lib/ios_arm64" ]; then
+            ls -la lib/ios_arm64
+          else
+            echo "Aviso: lib/ios_arm64 no existe en la raíz, buscando en ../lib"
+            ls -la lib/ios_arm64 || true
+          fi
 
       - name: Configure CMake (iOS)
-        working-directory: blender  # <--- CORRECCIÓN IMPORTANTE
+        working-directory: blender
         run: |
-          # Se ejecuta DENTRO de la carpeta blender
+          # AÑADIDO: -DLIBDIR=../lib para corregir la ruta de búsqueda
           cmake -S . -B build_ios -G Xcode \
+            -DLIBDIR=../lib \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
@@ -42,28 +52,27 @@ jobs:
             -DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM=""
 
       - name: Build Blender (Release)
-        working-directory: blender  # <--- CORRECCIÓN IMPORTANTE
+        working-directory: blender
         run: |
           # Compilamos la configuración Release
           cmake --build build_ios --config Release --parallel 3
 
       - name: Prepare IPA
-        working-directory: blender  # <--- CORRECCIÓN IMPORTANTE
+        working-directory: blender
         run: |
           cd build_ios
           mkdir Payload
-          # Movemos la app a la estructura Payload requerida por iOS
+          # Movemos la app a la estructura Payload
           cp -r Release-iphoneos/Blender.app Payload/
           
-          # Eliminamos firmas previas para evitar conflictos al firmar después
+          # Quitamos firma rota
           codesign --remove-signature Payload/Blender.app || true
           
-          # Creamos el IPA
+          # Creamos IPA
           zip -r Blender_iOS_Unsigned.ipa Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Blender_iOS_ReadyToSign
-          # La ruta debe incluir 'blender/' porque es donde se generó
           path: blender/build_ios/Blender_iOS_Unsigned.ipa
