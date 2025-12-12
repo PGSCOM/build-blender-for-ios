@@ -25,21 +25,12 @@ jobs:
         run: |
           brew install cmake git-lfs svn
           git lfs install
-  
-      - name: Cache Libraries (Critical for Speed)
-        id: cache-libs
-        uses: actions/cache@v3
-        with:
-          path: ../lib/
-          key: ${{ runner.os }}-blender-lib-ios-${{ hashFiles('build_files/build_environment/install_deps.sh') }}
-  
-      - name: Download Libraries (SVN)
-        if: steps.cache-libs.outputs.cache-hit != 'true'
+      
+      - name: Descargar librerías iOS (script oficial)
+        working-directory: blender
         run: |
-          # Descarga las librerías necesarias. Esto tarda bastante la primera vez.
-          mkdir -p ../lib
-          svn checkout https://svn.blender.org/svnroot/bf-blender/trunk/lib/ios_arm64 ../lib/ios_arm64
-          svn checkout https://svn.blender.org/svnroot/bf-blender/trunk/lib/darwin_arm64 ../lib/darwin_arm64
+          python3 ./build_files/utils/make_update.py --use-ios-libraries
+          make update
   
       - name: Configure CMake (iOS)
         run: |
